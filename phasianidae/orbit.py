@@ -1,7 +1,7 @@
 import math
 import scipy.optimize
 import time
-import utilities
+from . import utilities
 
 def cleanup(space_center):
     vessel = space_center.active_vessel
@@ -34,7 +34,8 @@ def closest_approach(space_center, reference_frame):
         orbit.position_at(optimum, reference_frame)))
     return optimum
 
-def wait_auto_pilot(vessel, error=0.5):
+def wait_auto_pilot(connection, error=0.5):
+    vessel = connection.space_center.active_vessel
     vessel.auto_pilot.attenuation_angle = (error, error, error)
     connection.space_center.physics_warp_factor = 3
     while abs(vessel.auto_pilot.error) > error * 10:
@@ -59,18 +60,19 @@ def wait_auto_pilot(vessel, error=0.5):
         time.sleep(0.1)
     print('\n', end='', flush=True)
 
-def target_direction_then_warp(space_center, ut, direction, error=0.5):
+def target_direction_then_warp(connection, ut, direction, error=0.5):
+    space_center = connection.space_center
     vessel = space_center.active_vessel
     vessel.auto_pilot.reference_frame = vessel.orbital_reference_frame
     node = vessel.control.add_node(ut, direction[1] * 100, direction[2] * 100, -direction[0] * 100)
     vessel.auto_pilot.target_direction = node.direction(vessel.auto_pilot.reference_frame)
-    wait_auto_pilot(vessel, error)
+    wait_auto_pilot(connection, error)
     space_center.warp_to(ut - 60)
     vessel.auto_pilot.target_direction = node.direction(vessel.auto_pilot.reference_frame)
-    wait_auto_pilot(vessel, error)
+    wait_auto_pilot(connection, error)
     space_center.warp_to(ut - 10)
     vessel.auto_pilot.target_direction = node.direction(vessel.auto_pilot.reference_frame)
-    wait_auto_pilot(vessel, error)
+    wait_auto_pilot(connection, error)
     space_center.warp_to(ut)
     node.remove()
     vessel.auto_pilot.target_direction = direction
@@ -88,7 +90,9 @@ def burn(vessel, error, gain, throttle_error=None):
         time.sleep(0.1)
     print('\n', end='', flush=True)
 
-def transfer(space_center, altitude, inclination_gain=100, altitude_gain=1, error=0.001, direction_error=0.5):
+def transfer(connection, altitude, inclination_gain=100, altitude_gain=1, error=0.001, direction_error=0.5):
+    space_center = connection.space_center
+    vessel = space_center.active_vessel
     while True:
         inclination = vessel.orbit.inclination
         print('inclination: {}'.format(inclination))
@@ -96,7 +100,7 @@ def transfer(space_center, altitude, inclination_gain=100, altitude_gain=1, erro
             break
         print('head to anti-normal at ascending node')
         target_direction_then_warp(
-            space_center,
+            connection,
             vessel.orbit.ut_at_true_anomaly(2 * math.pi - vessel.orbit.argument_of_periapsis),
             (0, 0, -1),
             direction_error)
@@ -115,14 +119,14 @@ def transfer(space_center, altitude, inclination_gain=100, altitude_gain=1, erro
                 if vessel.orbit.periapsis_altitude > altitude:
                     print('head to retrograde at apoapsis')
                     target_direction_then_warp(
-                        space_center,
+                        connection,
                         space_center.ut + vessel.orbit.time_to_apoapsis,
                         (0, -1, 0),
                         direction_error)
                 else:
                     print('head to prograde at apoapsis')
                     target_direction_then_warp(
-                        space_center,
+                        connection,
                         space_center.ut + vessel.orbit.time_to_apoapsis,
                         (0, 1, 0),
                         direction_error)
@@ -135,7 +139,7 @@ def transfer(space_center, altitude, inclination_gain=100, altitude_gain=1, erro
             else:
                 print('head to retrograde at periapsis')
                 target_direction_then_warp(
-                    space_center,
+                    connection,
                     space_center.ut + vessel.orbit.time_to_periapsis,
                     (0, -1, 0),
                     direction_error)
@@ -148,7 +152,7 @@ def transfer(space_center, altitude, inclination_gain=100, altitude_gain=1, erro
         elif apoapsis_set:
             print('head to prograde at apiapsis')
             target_direction_then_warp(
-                space_center,
+                connection,
                 space_center.ut + vessel.orbit.time_to_apoapsis,
                 (0, 1, 0),
                 direction_error)
@@ -161,7 +165,7 @@ def transfer(space_center, altitude, inclination_gain=100, altitude_gain=1, erro
         else:
             print('head to retrograde at periapsis')
             target_direction_then_warp(
-                space_center,
+                connection,
                 space_center.ut + vessel.orbit.time_to_periapsis,
                 (0, -1, 0),
                 direction_error)

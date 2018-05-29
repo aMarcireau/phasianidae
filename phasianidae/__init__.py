@@ -1,3 +1,3 @@
-import body
-import orbit
-import utilities
+from . import body
+from . import orbit
+from . import utilities

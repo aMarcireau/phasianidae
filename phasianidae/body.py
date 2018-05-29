@@ -1,6 +1,7 @@
 import math
-import orbit
 import time
+from . import orbit
+from . import utilities
 
 def calculate_landing_reference_frame(space_center, latitude, longitude, altitude):
     body = space_center.active_vessel.orbit.body
@@ -23,10 +24,92 @@ def calculate_landing_reference_frame(space_center, latitude, longitude, altitud
                 math.cos(latitude * 0.5 * math.pi / 180))),
         (altitude, 0, 0))
 
-def take_off():
-    pass
+def take_off(connection, target_altitude, pitch_profile, undershoot, precedence, precedence_hysteresis, apoapsis_k, eccentricity_k):
+    space_center = connection.space_center
+    vessel = space_center.active_vessel
 
-def landing(space_center, landing_site, warp_altitude, center_of_mass_height, target_speed_at_warp_altitude):
+    print('craft_directory: {}\nname: {}\nlaunch_site: {}\ntarget_altitude: {} m\npitch_profile: {}\nundershoot: {} m\nprecedence: {} s\nprecedence hysteresis: {}s\napoapsis_k: {} m^-1\neccentricity_k: {}'.format(craft_directory, name, launch_site, target_altitude, pitch_profile, undershoot, precedence, precedence_hysteresis, apoapsis_k, eccentricity_k))
+    connection.space_center.launch_vessel(craft_directory, name, launch_site)
+    vessel = connection.space_center.active_vessel
+    flight = vessel.flight()
+    vessel.auto_pilot.target_pitch_and_heading(90, 90)
+    vessel.auto_pilot.engage()
+    vessel.control.throttle = 1
+
+    # launch
+    vessel.control.activate_next_stage()
+    print('stage')
+
+    phase = 0
+    thrust = vessel.available_thrust
+    eccentricity = 1
+    while True:
+
+        # manage stagging
+        new_thrust = vessel.available_thrust
+        if abs(new_thrust - thrust) / thrust > 0.1:
+            print('stage')
+            vessel.control.activate_next_stage()
+            thrust = vessel.available_thrust
+        else:
+            thrust = new_thrust
+
+        # manage thrust and throttle
+        altitude = flight.mean_altitude
+        if phase == 0:
+            if altitude > 70000:
+                vessel.auto_pilot.target_pitch = 0
+                vessel.auto_pilot.throttle = 0
+                phase = 1
+            else:
+                vessel.auto_pilot.target_pitch = clamp(
+                    0,
+                    sum(coefficient * altitude ** index for index, coefficient in enumerate(pitch_profile)),
+                    90)
+                vessel.control.throttle = clamp(
+                    0,
+                    (target_altitude - undershoot - vessel.orbit.apoapsis_altitude) * apoapsis_k,
+                    1)
+        elif phase == 1:
+            if vessel.orbit.time_to_apoapsis < precedence:
+                eccentricity = vessel.orbit.eccentricity
+                vessel.control.throttle = 1
+                phase = 2
+        elif phase == 2:
+            if vessel.orbit.time_to_apoapsis > precedence:
+                vessel.control.throttle = 0
+                phase = 3
+            else:
+                new_eccentricity = vessel.orbit.eccentricity
+                if new_eccentricity < 0.001 or new_eccentricity > eccentricity:
+                    vessel.control.throttle = 0
+                    break
+                else:
+                    eccentricity = new_eccentricity
+                    vessel.control.throttle = clamp(0, eccentricity * eccentricity_k, 1)
+        elif phase == 3:
+            connection.space_center.warp_to(connection.space_center.ut + vessel.orbit.time_to_apoapsis - (precedence - precedence_hysteresis))
+            eccentricity = vessel.orbit.eccentricity
+            vessel.control.throttle = clamp(0, eccentricity * eccentricity_k, 1)
+            phase = 4
+        elif phase == 4:
+            if vessel.orbit.time_to_apoapsis > precedence:
+                vessel.control.throttle = 0
+                phase = 3
+            else:
+                new_eccentricity = vessel.orbit.eccentricity
+                if new_eccentricity < 0.001 or new_eccentricity > eccentricity:
+                    vessel.control.throttle = 0
+                    break
+                else:
+                    eccentricity = new_eccentricity
+                    vessel.control.throttle = clamp(0, eccentricity * eccentricity_k, 1)
+        print('phase {}, altitude: {} m, apoapsis: {} m, eccentricity: {}, pitch: {}, throttle: {}'.format(phase, altitude, vessel.orbit.apoapsis_altitude, vessel.orbit.eccentricity, vessel.auto_pilot.target_pitch, vessel.control.throttle))
+        time.sleep(0.1)
+    vessel.auto_pilot.disengage()
+
+def landing(connection, landing_site, warp_altitude, center_of_mass_height, target_speed_at_warp_altitude):
+    space_center = connection.space_center
     vessel = space_center.active_vessel
 
     # retro burn over landing site
@@ -36,7 +119,7 @@ def landing(space_center, landing_site, warp_altitude, center_of_mass_height, ta
     while True:
         print('head to retrograde over landing site, iteration {}'.format(index))
         index += 1
-        orbit.target_direction_then_warp(space_center, closest_approach(space_center, landing_reference_frame), (0, -1, 0))
+        orbit.target_direction_then_warp(connection, orbit.closest_approach(space_center, landing_reference_frame), (0, -1, 0))
         distance = math.sqrt(sum(
             coordinate ** 2
             for coordinate in vessel.orbit.position_at(space_center.ut, landing_reference_frame)[1:]))
@@ -61,7 +144,7 @@ def landing(space_center, landing_site, warp_altitude, center_of_mass_height, ta
     print('head to retrograde')
     vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
     vessel.auto_pilot.target_direction = (0, -1, 0)
-    wait_auto_pilot(vessel)
+    orbit.wait_auto_pilot(connection)
     print('warp to {} m, at {}'.format(warp_altitude, threshold_ut))
     space_center.warp_to(threshold_ut)
 
@@ -71,7 +154,7 @@ def landing(space_center, landing_site, warp_altitude, center_of_mass_height, ta
         target_speed = target_speed_at_warp_altitude * math.sqrt((flight.surface_altitude - center_of_mass_height) / warp_altitude)
         speed = -flight.vertical_speed
         print('\rspeed: {} / {}, altitude: {}'.format(speed, target_speed, flight.surface_altitude), end='', flush=True)
-        vessel.control.throttle = clamp(
+        vessel.control.throttle = utilities.clamp(
             0,
             (speed - target_speed) * 1,
             1)
