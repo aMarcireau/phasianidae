@@ -14,11 +14,13 @@ def cleanup(space_center):
     vessel.auto_pilot.engage()
     vessel.auto_pilot.sas = False
     for resource_harvester in vessel.parts.resource_harvesters:
-        resource_harvester.deployed = False
+        if resource_harvester.deployed:
+            resource_harvester.deployed = False
     for light in vessel.parts.lights:
         light.active = True
     for solar_panel in vessel.parts.solar_panels:
-        solar_panel.deployed = True
+        if solar_panel.deployable and not solar_panel.deployed:
+            solar_panel.deployed = True
 
 def closest_approach(space_center, reference_frame):
     orbit = space_center.active_vessel.orbit

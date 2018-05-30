@@ -13,5 +13,5 @@ phasianidae.orbit.cleanup(space_center)
 for engine in vessel.parts.engines:
     engine.active = (engine.part.name != 'engineLargeSkipper')
 phasianidae.orbit.transfer(connection, 12500)
-phasianidae.body.landing(connection, (0, -10, 0, 1000), 3000, 8.25, 90)
+phasianidae.body.landing(connection, (0, -10, 0, 2000), 3000, 10, 90, 0.2, 100)
 phasianidae.body.harvest(space_center)

@@ -3,6 +3,11 @@ import time
 from . import orbit
 from . import utilities
 
+def t(z, w, mu):
+    return (
+        (math.asin(math.sqrt(w * z)) - math.sqrt(w * z * (1 - w * z)))
+        / (math.sqrt(2 * mu) * w ** (3 / 2)))
+
 def calculate_landing_reference_frame(space_center, latitude, longitude, altitude):
     body = space_center.active_vessel.orbit.body
     create_relative = space_center.ReferenceFrame.create_relative
@@ -108,7 +113,7 @@ def take_off(connection, target_altitude, pitch_profile, undershoot, precedence,
         time.sleep(0.1)
     vessel.auto_pilot.disengage()
 
-def landing(connection, landing_site, warp_altitude, center_of_mass_height, target_speed_at_warp_altitude):
+def landing(connection, landing_site, warp_altitude, stop_altitude, speed_at_warp_altitude, speed_at_stop_altitude, deploy_altitude):
     space_center = connection.space_center
     vessel = space_center.active_vessel
 
@@ -126,39 +131,43 @@ def landing(connection, landing_site, warp_altitude, center_of_mass_height, targ
         print('distance to landing site: {}'.format(distance))
         if  distance < landing_site_radius:
             break
-    flight = vessel.flight(vessel.orbit.body.reference_frame)
+    body = vessel.orbit.body
+    flight = vessel.flight(body.reference_frame)
     orbit.burn(vessel, lambda vessel: flight.horizontal_speed, 0.1)
 
     # warp to warp_altitude
-    body = vessel.orbit.body
-    surface_offset = body.equatorial_radius + body.surface_height(flight.latitude, flight.longitude)
-    z0 = surface_offset + flight.surface_altitude
-    z1 = surface_offset + warp_altitude
-    mu = space_center.g * body.mass
-    w = 1.0 / z0 - flight.vertical_speed ** 2 / (2 * mu)
-    def t(z, w):
-        return (
-            (math.asin(math.sqrt(w * z)) - math.sqrt(w * z * (1 - w * z)))
-            / (math.sqrt(2 * mu) * w ** (3 / 2)))
-    threshold_ut = space_center.ut + t(z0, w) - t(z1, w)
     print('head to retrograde')
     vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
     vessel.auto_pilot.target_direction = (0, -1, 0)
     orbit.wait_auto_pilot(connection)
+    surface_offset = body.equatorial_radius + body.surface_height(flight.latitude, flight.longitude)
+    z0 = surface_offset + flight.surface_altitude
+    z1 = surface_offset + warp_altitude
+    mu = space_center.g * body.mass
+    w = 1.0 / z0 - (flight.vertical_speed ** 2) / (2 * mu)
+    threshold_ut = space_center.ut + t(z0, w, mu) - t(z1, w, mu)
     print('warp to {} m, at {}'.format(warp_altitude, threshold_ut))
     space_center.warp_to(threshold_ut)
 
     # descent burn
+    stop = False
     legs_deployed = False
     while True:
-        target_speed = target_speed_at_warp_altitude * math.sqrt((flight.surface_altitude - center_of_mass_height) / warp_altitude)
+        altitude = flight.surface_altitude
+        if altitude < stop_altitude:
+            if not stop:
+                print('\nstop reached, freezing speed and direction\n', end='', flush=True)
+                stop = True
+                vessel.auto_pilot.reference_frame = calculate_landing_reference_frame(space_center, flight.latitude, flight.longitude, 0)
+                vessel.auto_pilot.target_direction = (1, 0, 0)
+                target_speed = speed_at_stop_altitude
+        else:
+            ratio = math.sqrt((altitude - stop_altitude) / (warp_altitude - stop_altitude))
+            target_speed = ratio * speed_at_warp_altitude + (1 - ratio) * speed_at_stop_altitude
         speed = -flight.vertical_speed
-        print('\rspeed: {} / {}, altitude: {}'.format(speed, target_speed, flight.surface_altitude), end='', flush=True)
-        vessel.control.throttle = utilities.clamp(
-            0,
-            (speed - target_speed) * 1,
-            1)
-        if flight.surface_altitude < 100 and not legs_deployed:
+        print('\rspeed: {} / {}, altitude: {}'.format(speed, target_speed, altitude), end='', flush=True)
+        vessel.control.throttle = utilities.clamp(0, speed - target_speed, 1)
+        if flight.surface_altitude < deploy_altitude and not legs_deployed:
             legs_deployed = True
             vessel.parts.legs[0].deployed = True
         if vessel.situation == space_center.VesselSituation.landed:
