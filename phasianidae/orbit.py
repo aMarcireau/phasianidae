@@ -21,6 +21,9 @@ def cleanup(space_center):
     for solar_panel in vessel.parts.solar_panels:
         if solar_panel.deployable and not solar_panel.deployed:
             solar_panel.deployed = True
+    for radiator in vessel.parts.radiators:
+        if radiator.deployable and not radiator.deployed:
+            radiator.deployed = True
 
 def closest_approach(space_center, reference_frame):
     orbit = space_center.active_vessel.orbit
