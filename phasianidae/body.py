@@ -140,20 +140,19 @@ def landing(connection, landing_site, warp_altitude, stop_altitude, speed_at_war
     vessel.auto_pilot.reference_frame = vessel.surface_velocity_reference_frame
     vessel.auto_pilot.target_direction = (0, -1, 0)
     orbit.wait_auto_pilot(connection)
-    surface_offset = body.equatorial_radius + body.surface_height(flight.latitude, flight.longitude)
-    z0 = surface_offset + flight.surface_altitude
-    z1 = surface_offset + warp_altitude
+    z0 = body.equatorial_radius + flight.mean_altitude
+    z1 = body.equatorial_radius + warp_altitude + body.surface_height(flight.latitude, flight.longitude)
     mu = space_center.g * body.mass
     w = 1.0 / z0 - (flight.vertical_speed ** 2) / (2 * mu)
-    threshold_ut = space_center.ut + t(z0, w, mu) - t(z1, w, mu)
-    print('warp to {} m, at {}'.format(warp_altitude, threshold_ut))
-    space_center.warp_to(threshold_ut)
+    ut_delta = t(z0, w, mu) - t(z1, w, mu)
+    print('warp to {} m, in {} s'.format(warp_altitude, ut_delta))
+    space_center.warp_to(space_center.ut + ut_delta)
 
     # descent burn
     stop = False
     legs_deployed = False
     while True:
-        altitude = flight.surface_altitude
+        altitude = flight.mean_altitude - body.surface_height(flight.latitude, flight.longitude)
         if altitude < stop_altitude:
             if not stop:
                 print('\nstop reached, freezing speed and direction\n', end='', flush=True)
