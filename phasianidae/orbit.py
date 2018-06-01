@@ -12,6 +12,7 @@ def cleanup(space_center):
     vessel.control.rcs = False
     vessel.parts.legs[0].deployed = False
     vessel.auto_pilot.engage()
+    vessel.auto_pilot.target_roll = float('nan')
     vessel.auto_pilot.sas = False
     for resource_harvester in vessel.parts.resource_harvesters:
         if resource_harvester.deployed:
