@@ -3,14 +3,17 @@ import scipy.optimize
 import time
 from . import utilities
 
-def cleanup(space_center):
+def cleanup(connection):
+    space_center = connection.space_center
     vessel = space_center.active_vessel
     space_center.rails_warp_factor = 0
     space_center.physics_warp_factor = 0
     vessel.control.remove_nodes()
     vessel.control.throttle = 0
     vessel.control.rcs = False
-    vessel.parts.legs[0].deployed = False
+    for leg in vessel.parts.legs:
+        if leg.state == space_center.LegState.deployed:
+            leg.deployed = False
     vessel.auto_pilot.engage()
     vessel.auto_pilot.target_roll = float('nan')
     vessel.auto_pilot.sas = False
@@ -24,7 +27,7 @@ def cleanup(space_center):
             solar_panel.deployed = True
     for radiator in vessel.parts.radiators:
         if radiator.deployable and not radiator.deployed:
-            radiator.deployed = True
+            radiator.deployed = False
 
 def closest_approach(space_center, reference_frame, handle_message=print):
     orbit = space_center.active_vessel.orbit
@@ -52,7 +55,7 @@ def wait_auto_pilot(connection, error=0.5, handle_message=print):
     ticks_left = 50
     while True:
         current_error = abs(vessel.auto_pilot.error)
-        handle_message('\r{}'.format(current_error), end='', flush=True)
+        handle_message('\rangle error: {}'.format(current_error), end='', flush=True)
         ticks_left -= 1
         if ticks_left == 0:
             if abs(previous_error - current_error) / current_error < 0.001:
@@ -73,13 +76,19 @@ def target_direction_then_warp(connection, ut, direction, error=0.5, handle_mess
     node = vessel.control.add_node(ut, direction[1] * 100, direction[2] * 100, -direction[0] * 100)
     vessel.auto_pilot.target_direction = node.direction(vessel.auto_pilot.reference_frame)
     wait_auto_pilot(connection, error, handle_message=handle_message)
+    vessel.auto_pilot.disengage()
     space_center.warp_to(ut - 60)
+    vessel.auto_pilot.engage()
     vessel.auto_pilot.target_direction = node.direction(vessel.auto_pilot.reference_frame)
     wait_auto_pilot(connection, error, handle_message=handle_message)
+    vessel.auto_pilot.disengage()
     space_center.warp_to(ut - 10)
+    vessel.auto_pilot.engage()
     vessel.auto_pilot.target_direction = node.direction(vessel.auto_pilot.reference_frame)
     wait_auto_pilot(connection, error, handle_message=handle_message)
+    vessel.auto_pilot.disengage()
     space_center.warp_to(ut)
+    vessel.auto_pilot.engage()
     node.remove()
     vessel.auto_pilot.target_direction = direction
 
@@ -87,7 +96,7 @@ def burn(vessel, error, gain, throttle_error=None, handle_message=print):
     previous_error = error(vessel)
     while True:
         current_error = error(vessel)
-        handle_message('\r{}'.format(current_error), end='', flush=True)
+        handle_message('\rburn error: {}'.format(current_error), end='', flush=True)
         if current_error > previous_error:
             vessel.control.throttle = 0
             break
@@ -111,7 +120,6 @@ def transfer(connection, altitude, inclination_gain=100, altitude_gain=1, error=
             (0, 0, -1),
             direction_error,
             handle_message=handle_message)
-        handle_message('burn')
         burn(vessel, lambda vessel: vessel.orbit.inclination / (2 * math.pi), inclination_gain, handle_message=handle_message)
     while True:
         def altitude_error(orbit, altitude):
@@ -139,7 +147,6 @@ def transfer(connection, altitude, inclination_gain=100, altitude_gain=1, error=
                         (0, 1, 0),
                         direction_error,
                         handle_message=handle_message)
-                handle_message('burn')
                 burn(
                     vessel,
                     lambda vessel: altitude_error(vessel.orbit, altitude),
@@ -147,14 +154,13 @@ def transfer(connection, altitude, inclination_gain=100, altitude_gain=1, error=
                     lambda vessel: abs(vessel.orbit.periapsis_altitude - altitude) / altitude,
                     handle_message=handle_message)
             else:
-                handle_message('head to retrograde at periapsis')
+                handle_message('head to prograde at periapsis')
                 target_direction_then_warp(
                     connection,
                     space_center.ut + vessel.orbit.time_to_periapsis,
-                    (0, -1, 0),
+                    (0, 1, 0),
                     direction_error,
                     handle_message=handle_message)
-                handle_message('burn')
                 burn(
                     vessel,
                     lambda vessel: altitude_error(vessel.orbit, altitude),
@@ -169,7 +175,6 @@ def transfer(connection, altitude, inclination_gain=100, altitude_gain=1, error=
                 (0, 1, 0),
                 direction_error,
                 handle_message=handle_message)
-            handle_message('burn')
             burn(
                 vessel,
                 lambda vessel: altitude_error(vessel.orbit, altitude),
@@ -184,7 +189,6 @@ def transfer(connection, altitude, inclination_gain=100, altitude_gain=1, error=
                 (0, -1, 0),
                 direction_error,
                 handle_message=handle_message)
-            handle_message('burn')
             burn(
                 vessel,
                 lambda vessel: altitude_error(vessel.orbit, altitude),
